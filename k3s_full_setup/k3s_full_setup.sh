@@ -46,20 +46,34 @@ print_color() {
 
 # Function to save credentials
 save_credentials() {
-    local filename="k3s_credentials.txt"
-    echo "K3s Cluster Credentials" > $filename
-    echo "========================" >> $filename
-    echo "Date: $(date)" >> $filename
-    echo "" >> $filename
-    echo "ArgoCD:" >> $filename
-    echo "  Username: admin" >> $filename
-    echo "  Password: $1" >> $filename
-    echo "" >> $filename
-    echo "Kubernetes Dashboard:" >> $filename
-    echo "  Token: $2" >> $filename
-    echo "" >> $filename
-    echo "Remember to keep this file secure and delete it when no longer needed." >> $filename
-    print_color $GREEN "Credentials saved to $filename"
+    local filename="/root/k3s_credentials.log"
+    local argocd_password="$1"
+    local dashboard_token="$2"
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+
+    # Append a separator and timestamp
+    echo -e "\n\n========================================" >> "$filename"
+    echo "K3s Cluster Credentials - $timestamp" >> "$filename"
+    echo "========================================" >> "$filename"
+
+    # Append the new credentials
+    echo "ArgoCD:" >> "$filename"
+    echo "  Username: admin" >> "$filename"
+    echo "  Password: $argocd_password" >> "$filename"
+    echo "" >> "$filename"
+    echo "Kubernetes Dashboard:" >> "$filename"
+    echo "  Token: $dashboard_token" >> "$filename"
+    echo "" >> "$filename"
+    echo "Remember to keep this file secure and delete it when no longer needed." >> "$filename"
+
+    print_color $GREEN "Credentials appended to $filename"
+
+    # Display a warning about the file
+    print_color $YELLOW "WARNING: Credentials are being stored in plain text. Ensure the file is secured and deleted when no longer needed."
+
+    # Optionally, set strict permissions on the file
+    chmod 600 "$filename"
+    print_color $BLUE "File permissions set to 600 (read/write for owner only)"
 }
 
 # Function to install K3s
@@ -229,7 +243,35 @@ troubleshoot_helm() {
 
     print_color $GREEN "Troubleshooting complete. If issues persist, please check your network configuration and firewall settings."
 }
+get_argocd_password() {
+    print_color $BLUE "Retrieving ArgoCD initial admin password..."
+    
+    # Wait for the argocd-initial-admin-secret to be created
+    local max_retries=30
+    local retry_interval=10
+    local retry_count=0
+    
+    while ! kubectl get secret argocd-initial-admin-secret -n argocd &> /dev/null; do
+        if [ $retry_count -ge $max_retries ]; then
+            print_color $RED "Timed out waiting for ArgoCD admin secret to be created."
+            return 1
+        fi
+        print_color $YELLOW "Waiting for ArgoCD admin secret to be created... (Attempt $((retry_count+1))/$max_retries)"
+        sleep $retry_interval
+        ((retry_count++))
+    done
 
+    # Extract the password
+    local argocd_password=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+    
+    if [ -z "$argocd_password" ]; then
+        print_color $RED "Failed to retrieve ArgoCD password."
+        return 1
+    else
+        print_color $GREEN "ArgoCD initial admin password retrieved successfully."
+        echo $argocd_password
+    fi
+}
 # Function to install and verify Helm
 install_and_verify_helm() {
     print_color $BLUE "Installing Helm..."
@@ -446,8 +488,20 @@ install_and_verify_helm
 print_color $BLUE "Installing ArgoCD..."
 install_argocd
 
+# Get ArgoCD password
+argocd_password=$(get_argocd_password)
+if [ $? -ne 0 ]; then
+    print_color $RED "Failed to get ArgoCD password. Please check ArgoCD installation."
+else
+    print_color $GREEN "ArgoCD installed successfully."
+fi
+
 # Install Kubernetes Dashboard
 print_color $BLUE "Installing Kubernetes Dashboard..."
 install_dashboard
 
-print_color $GREEN "Installation complete..."
+# Get Kubernetes Dashboard token
+dashboard_token=$(kubectl -n kubernetes-dashboard create token admin-user)
+
+# Save or display credentials
+append_credentials "$argocd_password" "$dashboard_token"
