@@ -79,7 +79,7 @@ save_credentials() {
 # Function to install K3s
 install_k3s() {
     print_color $BLUE "Installing K3s..."
-    curl -sfL https://get.k3s.io | sh -s - $@ &
+    curl -sfL https://get.k3s.io | sh -s --disable traefik - $@ &
     spinner $!
     print_color $GREEN "K3s installed successfully."
 }
